@@ -125,6 +125,28 @@ func rewriteOptions(args []string, opts *githistory.RewriteOptions, l *tasklog.L
 	}, nil
 }
 
+// isSpecialGitRef checks if a ref spec is a special git ref to exclude from
+// --everything
+func isSpecialGitRef(refspec string) bool {
+	// Special refspecs.
+	switch refspec {
+	case "refs/stash":
+		return true
+	}
+
+	// Special refspecs from namespaces.
+	parts := strings.SplitN(refspec, "/", 3)
+	if len(parts) < 3 {
+		return false
+	}
+	prefix := strings.Join(parts[:2], "/")
+	switch prefix {
+	case "refs/notes", "refs/bisect", "refs/replace":
+		return true
+	}
+	return false
+}
+
 // includeExcludeRefs returns fully-qualified sets of references to include, and
 // exclude, or an error if those could not be determined.
 //
@@ -198,18 +220,10 @@ func includeExcludeRefs(l *tasklog.Logger, args []string) (include, exclude []st
 
 				include = append(include, ref.Refspec())
 			case git.RefTypeOther:
-				parts := strings.SplitN(ref.Refspec(), "/", 3)
-				if len(parts) < 2 {
+				if isSpecialGitRef(ref.Refspec()) {
 					continue
 				}
-
-				switch parts[1] {
-				// The following are GitLab-, GitHub-, VSTS-,
-				// and BitBucket-specific reference naming
-				// conventions.
-				case "merge-requests", "pull", "pull-requests":
-					include = append(include, ref.Refspec())
-				}
+				include = append(include, ref.Refspec())
 			}
 		}
 	} else {
@@ -252,11 +266,9 @@ func getRemoteRefs(l *tasklog.Logger) (map[string][]*git.Ref, error) {
 	}
 
 	if !migrateSkipFetch {
-		w := l.Waiter(fmt.Sprintf("migrate: %s", tr.Tr.Get("Fetching remote refs")))
-		if err := git.Fetch(remotes...); err != nil {
+		if err := fetchRemoteRefs(l, remotes); err != nil {
 			return nil, err
 		}
-		w.Complete()
 	}
 
 	for _, remote := range remotes {
@@ -264,7 +276,7 @@ func getRemoteRefs(l *tasklog.Logger) (map[string][]*git.Ref, error) {
 		if migrateSkipFetch {
 			refsForRemote, err = git.CachedRemoteRefs(remote)
 		} else {
-			refsForRemote, err = git.RemoteRefs(remote)
+			refsForRemote, err = git.RemoteRefs(remote, true)
 		}
 
 		if err != nil {
@@ -275,6 +287,13 @@ func getRemoteRefs(l *tasklog.Logger) (map[string][]*git.Ref, error) {
 	}
 
 	return refs, nil
+}
+
+func fetchRemoteRefs(l *tasklog.Logger, remotes []string) error {
+	w := l.Waiter(fmt.Sprintf("migrate: %s", tr.Tr.Get("Fetching remote refs")))
+	defer w.Complete()
+
+	return git.Fetch(remotes...)
 }
 
 // formatRefName returns the fully-qualified name for the given Git reference

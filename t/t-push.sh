@@ -38,6 +38,16 @@ begin_test "push with tracked ref"
 )
 end_test
 
+begin_test "push with invalid ref"
+(
+  set -e
+  push_repo_setup "push-invalid-branch-required"
+
+  git lfs push origin jibberish >push.log 2>&1 && exit 1
+  grep "Invalid ref argument" push.log
+)
+end_test
+
 begin_test "push with bad ref"
 (
   set -e
@@ -53,6 +63,16 @@ begin_test "push with bad ref"
 )
 end_test
 
+begin_test "push with nothing"
+(
+  set -e
+  push_repo_setup "push-nothing"
+
+  git lfs push origin 2>&1 | tee push.log
+  grep "At least one ref must be supplied without --all" push.log
+)
+end_test
+
 begin_test "push with given remote, configured pushRemote"
 (
   set -e
@@ -65,6 +85,17 @@ begin_test "push with given remote, configured pushRemote"
   git lfs push --all origin
 )
 end_test
+
+begin_test "push via stdin with extra arguments"
+(
+  set -e
+
+  push_repo_setup "push-stdin-extra-args"
+
+  echo "main" | git lfs push origin --stdin --dry-run "another-ref" \
+    2>&1 | tee push.log
+  grep "Further command line arguments are ignored with --stdin" push.log
+)
 
 begin_test "push"
 (
@@ -94,6 +125,11 @@ begin_test "push"
   git commit -m "add b.dat"
 
   git lfs push --dry-run origin push-b 2>&1 | tee push.log
+  grep "push 4c48d2a6991c9895bcddcf027e1e4907280bcf21975492b1afbade396d6a3340 => a.dat" push.log
+  grep "push 82be50ad35070a4ef3467a0a650c52d5b637035e7ad02c36652e59d01ba282b7 => b.dat" push.log
+  [ $(grep -c "^push " < push.log) -eq 2 ]
+
+  printf "push-b\n\n" | git lfs push --dry-run origin --stdin 2>&1 | tee push.log
   grep "push 4c48d2a6991c9895bcddcf027e1e4907280bcf21975492b1afbade396d6a3340 => a.dat" push.log
   grep "push 82be50ad35070a4ef3467a0a650c52d5b637035e7ad02c36652e59d01ba282b7 => b.dat" push.log
   [ $(grep -c "^push " < push.log) -eq 2 ]
@@ -301,6 +337,13 @@ begin_test "push --all (multiple ref args)"
   grep "push $oid4 => file1.dat" push.log
   [ $(grep -c "^push " push.log) -eq 4 ]
 
+  printf "branch\ntag" | git lfs push --dry-run --all origin --stdin 2>&1 | tee push.log
+  grep "push $oid1 => file1.dat" push.log
+  grep "push $oid2 => file1.dat" push.log
+  grep "push $oid3 => file1.dat" push.log
+  grep "push $oid4 => file1.dat" push.log
+  [ $(grep -c "^push " push.log) -eq 4 ]
+
   git lfs push --all origin branch tag 2>&1 | tee push.log
   [ $(grep -c "Uploading LFS objects: 100% (4/4)" push.log) -eq 1 ]
   assert_server_object "$reponame-$suffix" "$oid1"
@@ -409,6 +452,9 @@ begin_test "push object id(s)"
   git add .gitattributes a.dat
   git commit -m "add a.dat"
 
+  git lfs push --object-id origin --dry-run 2>&1 | tee push.log
+  grep "At least one object ID must be supplied with --object-id" push.log
+
   git lfs push --object-id origin \
     4c48d2a6991c9895bcddcf027e1e4907280bcf21975492b1afbade396d6a3340 \
     2>&1 | tee push.log
@@ -423,6 +469,46 @@ begin_test "push object id(s)"
     82be50ad35070a4ef3467a0a650c52d5b637035e7ad02c36652e59d01ba282b7 \
     2>&1 | tee push.log
   grep "Uploading LFS objects: 100% (2/2), 14 B" push.log
+)
+end_test
+
+begin_test "push object id(s) via stdin"
+(
+  set -e
+
+  reponame="$(basename "$0" ".sh")"
+  setup_remote_repo "$reponame"
+  clone_repo "$reponame" repo3
+
+  git config "lfs.$(repo_endpoint "$GITSERVER" "$reponame").locksverify" true
+
+  git lfs track "*.dat"
+  echo "push a" > a.dat
+  git add .gitattributes a.dat
+  git commit -m "add a.dat"
+
+  git lfs push --object-id origin --stdin --dry-run </dev/null 2>&1 | tee push.log
+  grep "At least one object ID must be supplied with --object-id" push.log && exit 1
+
+  echo "4c48d2a6991c9895bcddcf027e1e4907280bcf21975492b1afbade396d6a3340" | \
+    git lfs push --object-id origin --stdin --dry-run "c0ffee" \
+    2>&1 | tee push.log
+  grep "Further command line arguments are ignored with --stdin" push.log
+
+  echo "4c48d2a6991c9895bcddcf027e1e4907280bcf21975492b1afbade396d6a3340" | \
+    git lfs push --object-id origin --stdin --dry-run \
+    2>&1 | tee push.log
+  grep "push 4c48d2a6991c9895bcddcf027e1e4907280bcf21975492b1afbade396d6a3340 =>" push.log
+
+  echo "push b" > b.dat
+  git add b.dat
+  git commit -m "add b.dat"
+
+  printf "4c48d2a6991c9895bcddcf027e1e4907280bcf21975492b1afbade396d6a3340\n82be50ad35070a4ef3467a0a650c52d5b637035e7ad02c36652e59d01ba282b7\n\n" | \
+    git lfs push --object-id origin --stdin --dry-run \
+    2>&1 | tee push.log
+  grep "push 4c48d2a6991c9895bcddcf027e1e4907280bcf21975492b1afbade396d6a3340 =>" push.log
+  grep "push 82be50ad35070a4ef3467a0a650c52d5b637035e7ad02c36652e59d01ba282b7 =>" push.log
 )
 end_test
 
@@ -784,6 +870,44 @@ begin_test 'push with multiple refs and data the server already has'
   [ "$(grep -c "$contents_oid" push.log)" = 0 ]
 
   # Yet we should have pushed the new object successfully.
+  assert_server_object "$reponame" "$contents2_oid"
+)
+end_test
+
+begin_test 'push with multiple tag refs'
+(
+  set -e
+
+  reponame="push-multi-ref-tags"
+  setup_remote_repo "$reponame"
+  clone_repo "$reponame" "$reponame"
+
+  git lfs track "*.dat"
+  git add .gitattributes
+  git commit -m "initial commit"
+
+  contents="abc123"
+  contents_oid="$(calc_oid "$contents")"
+  printf "%s" "$contents" > a.dat
+  git add a.dat
+  git commit -m "add a.dat"
+
+  git tag v1.0.0
+
+  git push origin main v1.0.0
+
+  assert_server_object "$reponame" "$contents_oid"
+
+  contents2="def456"
+  contents2_oid="$(calc_oid "$contents2")"
+  printf "%s" "$contents2" > b.dat
+  git add b.dat
+  git commit -m "add b.dat"
+
+  git tag v1.0.1
+
+  git lfs push origin v1.0.1
+
   assert_server_object "$reponame" "$contents2_oid"
 )
 end_test

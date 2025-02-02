@@ -191,6 +191,10 @@ func (c *Configuration) TusTransfersAllowed() bool {
 	return c.Git.Bool("lfs.tustransfers", false)
 }
 
+func (c *Configuration) TransferBatchSize() int {
+	return c.Git.Int("lfs.transfer.batchSize", 0)
+}
+
 func (c *Configuration) FetchIncludePaths() []string {
 	patterns, _ := c.Git.Get("lfs.fetchinclude")
 	return tools.CleanPaths(patterns, ",")
@@ -218,6 +222,14 @@ func (c *Configuration) CurrentRef() *git.Ref {
 
 func (c *Configuration) IsDefaultRemote() bool {
 	return c.Remote() == defaultRemote
+}
+
+func (c *Configuration) AutoDetectRemoteEnabled() bool {
+	return c.Git.Bool("lfs.remote.autodetect", false)
+}
+
+func (c *Configuration) SearchAllRemotesEnabled() bool {
+	return c.Git.Bool("lfs.remote.searchall", false)
 }
 
 // Remote returns the default remote based on:
@@ -514,9 +526,9 @@ func (c *Configuration) UnsetGitLocalKey(key string) (string, error) {
 
 // loadGitConfig is a temporary measure to support legacy behavior dependent on
 // accessing properties set by ReadGitConfig, namely:
-//  - `c.extensions`
-//  - `c.uniqRemotes`
-//  - `c.gitConfig`
+//   - `c.extensions`
+//   - `c.uniqRemotes`
+//   - `c.gitConfig`
 //
 // Since the *gitEnvironment is responsible for setting these values on the
 // (*config.Configuration) instance, we must call that method, if it exists.
